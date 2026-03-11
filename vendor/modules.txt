@@ -1,0 +1,17 @@
+# github.com/edwingeng/deque/v2 v2.1.1
+## explicit; go 1.18
+github.com/edwingeng/deque/v2
+# github.com/gorilla/websocket v1.5.1
+## explicit; go 1.17
+github.com/gorilla/websocket
+# golang.org/x/net v0.17.0
+## explicit; go 1.18
+golang.org/x/net/http2/hpack
+# google.golang.org/protobuf v1.34.1
+## explicit; go 1.21
+google.golang.org/protobuf/proto
+google.golang.org/protobuf/encoding/protowire
+google.golang.org/protobuf/internal/encoding/wire
+google.golang.org/protobuf/internal/impl
+google.golang.org/protobuf/reflect/protoreflect
+google.golang.org/protobuf/runtime/protoimpl

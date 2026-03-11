@@ -1,0 +1,243 @@
+package server
+
+import (
+	"google.golang.org/protobuf/proto"
+	"net"
+	"sync"
+	"wirstaff.com/mirrors/a2s"
+	"wirstaff.com/mirrors/protocol"
+	"wirstaff.com/mirrors/protocol/protobuf"
+	"wirstaff.com/mirrors/protocol/steamlang"
+	"wirstaff.com/mirrors/steam"
+	"wirstaff.com/mirrors/steamid"
+)
+
+type Client struct {
+	ServerSocket      *net.UDPConn // подключение к игровому сервера
+	ClientMessageSend chan []byte
+
+	Server *Server
+}
+
+type Server struct {
+	hostname   string
+	mapName    string
+	maxPlayers uint8
+	secure     bool
+	region     string
+	port       uint32
+	bots       uint8
+	csgoMod    bool
+	tags       string
+	abuse      bool
+	players    uint8
+	steamID    uint64
+	gameDir    string
+
+	appid   uint32
+	version string
+
+	client *steam.Client
+
+	tickets      []*protobuf.CMsgAuthTicket
+	ticketsMutex sync.Mutex
+}
+
+func New() *Server {
+	server := &Server{
+		appid:   730,
+		version: "13992",
+	}
+
+	return server
+}
+
+func (s *Server) SetVersion(v string) {
+	if v != "" {
+		s.version = v
+	}
+}
+
+func (s *Server) SetGameDir(d string) {
+	s.gameDir = d
+}
+
+func (s *Server) getGameDir() string {
+	if s.gameDir != "" {
+		return s.gameDir
+	}
+	if s.csgoMod {
+		return "csgo"
+	}
+	return "cs2"
+}
+
+func (s *Server) Connect() {
+	s.client = steam.New()
+	s.client.RegisterPacketHandler(s)
+	s.client.Connect()
+}
+
+func (s *Server) Logon(token string) {
+	builder := new(protobuf.CMsgClientLogon)
+	builder.ProtocolVersion = proto.Uint32(steamlang.MsgClientLogon_CurrentProtocol)
+	builder.GameServerAppId = proto.Int32(int32(s.appid))
+	builder.GameServerToken = proto.String(token)
+	s.client.SetSessionId(0)
+	s.client.SetSteamId(uint64(steamid.NewIdAdv(0, 0, int32(steamlang.EUniverse_Public), int32(steamlang.EAccountType_GameServer))))
+	s.client.Write(protocol.NewClientMsgProtobuf(steamlang.EMsg_ClientLogonGameServer, builder))
+}
+
+func (s *Server) Events() <-chan interface{} {
+	return s.client.Events()
+}
+
+func (s *Server) sendServerType() {
+	builder := new(protobuf.CMsgGSServerType)
+	builder.AppIdServed = proto.Uint32(s.appid)
+
+	flags := steamlang.EServerFlags_Active | steamlang.EServerFlags_Dedicated | steamlang.EServerFlags_Linux
+
+	if s.secure {
+		flags = flags | steamlang.EServerFlags_Secure
+	}
+
+	builder.Flags = proto.Uint32(uint32(flags))
+	builder.GameQueryPort = proto.Uint32(s.port)
+	builder.GamePort = proto.Uint32(s.port)
+	builder.GameVersion = proto.String(s.version)
+
+	gameDir := s.getGameDir()
+	builder.GameDir = proto.String(gameDir)
+
+	s.client.Write(protocol.NewClientMsgProtobuf(steamlang.EMsg_GSServerType, builder))
+}
+
+func (s *Server) StartA2S(serverAddress string) {
+	go a2s.ListenAndServe(s.port, &a2s.ServerInfo{
+		Hostname:      s.hostname,
+		Map:           s.mapName,
+		Folder:        "cs2",
+		Game:          "Counter-Strike 2",
+		Players:       func() uint8 { if s.abuse { return s.players }; return 0 }(),
+		MaxPlayers:    s.maxPlayers,
+		Bots:          s.bots,
+		Secure:        s.secure,
+		Tags:          s.tags,
+		ServerAddress: serverAddress,
+		SteamID:       &s.steamID,
+		Port:          uint16(s.port),
+	})
+}
+
+func (s *Server) sendServerData() {
+	builder := new(protobuf.CMsgGameServerData)
+
+	builder.Name = proto.String(s.hostname)
+	builder.Map = proto.String(s.mapName)
+	builder.QueryPort = proto.Uint32(s.port)
+	builder.GamePort = proto.Uint32(s.port)
+	builder.AppId = proto.Uint32(s.appid)
+	builder.MaxPlayers = proto.Uint32(uint32(s.maxPlayers))
+	if s.abuse {
+		for i := uint8(0); i < s.players; i++ {
+			fakeID := uint64(76561198000000000) + uint64(i) + uint64(s.port)*1000
+			builder.Players = append(builder.Players, &protobuf.CMsgGameServerData_Player{
+				SteamId: proto.Uint64(fakeID),
+			})
+		}
+	}
+	builder.BotCount = proto.Uint32(uint32(s.bots))
+	builder.Version = proto.String(s.version)
+	builder.Secure = proto.Bool(s.secure)
+	builder.Dedicated = proto.Bool(true)
+	builder.GameType = proto.String(s.tags)
+
+	gameDir := s.getGameDir()
+	builder.Product = proto.String("cs2")
+
+	builder.Region = proto.String(s.region)
+	builder.Gamedir = proto.String(gameDir)
+	builder.Os = proto.String("l")
+
+	s.client.Write(protocol.NewClientMsgProtobuf(steamlang.EMsg_AMGameServerUpdate, builder))
+}
+
+func (s *Server) AddFakeClient(steamId uint64, ticket []byte, crc uint32) {
+	builder := new(protobuf.CMsgAuthTicket)
+
+	builder.Gameid = proto.Uint64(uint64(s.appid))
+	builder.Steamid = proto.Uint64(steamId)
+
+	builder.Ticket = ticket
+
+	builder.TicketCrc = proto.Uint32(crc)
+
+	builder.Estate = proto.Uint32(1)
+	builder.Eresult = proto.Uint32(0)
+
+	s.ticketsMutex.Lock()
+	s.tickets = append(s.tickets, builder)
+	s.ticketsMutex.Unlock()
+}
+
+func (s *Server) SendTickets() {
+	builder := new(protobuf.CMsgClientAuthList)
+	builder.TokensLeft = proto.Uint32(0)
+	builder.LastRequestSeq = proto.Uint32(0)
+	builder.LastRequestSeqFromServer = proto.Uint32(0)
+	s.ticketsMutex.Lock()
+	builder.Tickets = s.tickets
+	s.ticketsMutex.Unlock()
+	builder.MessageSequence = proto.Uint32(uint32(len(s.tickets)))
+	builder.AppIds = append(builder.AppIds, s.appid)
+	s.client.Write(protocol.NewClientMsgProtobuf(steamlang.EMsg_ClientAuthList, builder))
+}
+
+func (s *Server) HeartBeat() {
+	s.client.Write(protocol.NewClientMsgProtobuf(steamlang.EMsg_ClientHeartBeat, new(protobuf.CMsgClientHeartBeat)))
+}
+
+func (s *Server) SetHostname(value string) {
+	s.hostname = value
+}
+
+func (s *Server) SetMap(value string) {
+	s.mapName = value
+}
+
+func (s *Server) SetMaxPlayers(value uint8) {
+	s.maxPlayers = value
+}
+
+func (s *Server) SetSecure(value bool) {
+	s.secure = value
+}
+
+func (s *Server) SetRegion(value string) {
+	s.region = value
+}
+
+func (s *Server) SetPort(value uint32) {
+	s.port = value
+}
+
+func (s *Server) SetBots(value uint8) {
+	s.bots = value
+}
+
+func (s *Server) SetCSGOMod(value bool) {
+	s.csgoMod = value
+}
+
+func (s *Server) SetTags(value string) {
+	s.tags = value
+}
+
+func (s *Server) SetAbuse(value bool) {
+	s.abuse = value
+}
+
+func (s *Server) SetPlayers(value uint8) {
+	s.players = value
+}

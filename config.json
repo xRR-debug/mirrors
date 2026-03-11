@@ -1,0 +1,22 @@
+{
+  "start_port": 27016,
+  "csgo_mod": false,
+  "servers": [
+    {
+      "count": 2,
+      "server_address": "your_ip:port",
+      "players": 0,
+      "max_players": 32,
+      "bots": 0,
+      "hostname": "yourservername",
+      "map": "yourmapname",
+      "region": "-1",
+      "secure": true,
+      "tags": "empty,secure",
+      "version": "1.41.3.8",
+      "game_dir": "csgo",
+      "use_abuse": false,
+      "description": ""
+    }
+  ]
+}
