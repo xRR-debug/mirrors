@@ -4,7 +4,7 @@
 ## Требования
 
 - Go 1.22+
-- Токены игровых серверов Steam (из https://steamcommunity.com/dev/managegameservers, AppID = 730)
+- Токены игровых серверов Steam (из https://steamcommunity.com/dev/managegameservers, AppID = 730(CS2))
 
 ## Файлы конфигурации
 
