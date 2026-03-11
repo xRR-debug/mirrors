@@ -2,16 +2,38 @@
 ## explicit; go 1.18
 github.com/edwingeng/deque/v2
 # github.com/gorilla/websocket v1.5.1
-## explicit; go 1.17
+## explicit; go 1.20
 github.com/gorilla/websocket
-# golang.org/x/net v0.17.0
-## explicit; go 1.18
-golang.org/x/net/http2/hpack
+# golang.org/x/net v0.38.0
+## explicit; go 1.23.0
+golang.org/x/net/internal/socks
+golang.org/x/net/proxy
 # google.golang.org/protobuf v1.34.1
-## explicit; go 1.21
-google.golang.org/protobuf/proto
+## explicit; go 1.17
+google.golang.org/protobuf/encoding/prototext
 google.golang.org/protobuf/encoding/protowire
-google.golang.org/protobuf/internal/encoding/wire
+google.golang.org/protobuf/internal/descfmt
+google.golang.org/protobuf/internal/descopts
+google.golang.org/protobuf/internal/detrand
+google.golang.org/protobuf/internal/editiondefaults
+google.golang.org/protobuf/internal/encoding/defval
+google.golang.org/protobuf/internal/encoding/messageset
+google.golang.org/protobuf/internal/encoding/tag
+google.golang.org/protobuf/internal/encoding/text
+google.golang.org/protobuf/internal/errors
+google.golang.org/protobuf/internal/filedesc
+google.golang.org/protobuf/internal/filetype
+google.golang.org/protobuf/internal/flags
+google.golang.org/protobuf/internal/genid
 google.golang.org/protobuf/internal/impl
+google.golang.org/protobuf/internal/order
+google.golang.org/protobuf/internal/pragma
+google.golang.org/protobuf/internal/set
+google.golang.org/protobuf/internal/strs
+google.golang.org/protobuf/internal/version
+google.golang.org/protobuf/proto
 google.golang.org/protobuf/reflect/protoreflect
+google.golang.org/protobuf/reflect/protoregistry
+google.golang.org/protobuf/runtime/protoiface
 google.golang.org/protobuf/runtime/protoimpl
+google.golang.org/protobuf/types/descriptorpb
