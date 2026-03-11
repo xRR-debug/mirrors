@@ -4,7 +4,7 @@
   "servers": [
     {
       "count": 2,
-      "server_address": "your_ip:port",
+      "server_address": "yourip:yourport",
       "players": 0,
       "max_players": 32,
       "bots": 0,
