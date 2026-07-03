@@ -1,6 +1,6 @@
 module wirstaff.com/mirrors
 
-go 1.22
+go 1.25.0
 
 require (
 	github.com/edwingeng/deque/v2 v2.1.1
@@ -8,4 +8,4 @@ require (
 	google.golang.org/protobuf v1.34.1
 )
 
-require golang.org/x/net v0.17.0 // indirect
+require golang.org/x/net v0.55.0 // indirect
