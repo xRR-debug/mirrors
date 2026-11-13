@@ -130,6 +130,15 @@ var mirrors []*server.Server
 var playersMutex sync.RWMutex
 var players []*player.Player
 
+type abuseMirror struct {
+	server *server.Server
+	item   Servers
+	port   uint32
+}
+
+var abuseMirrorsMutex sync.Mutex
+var abuseMirrors []abuseMirror
+
 // глобальный счётчик использованных аккаунтов
 var accountsIndex int
 var accountsMutex sync.Mutex
@@ -215,6 +224,11 @@ func runServer(item Servers, token string, port uint32, config *Config) {
 				mirrorsMutex.Lock()
 				mirrors = append(mirrors, s)
 				mirrorsMutex.Unlock()
+				if item.UseAbuse {
+					abuseMirrorsMutex.Lock()
+					abuseMirrors = append(abuseMirrors, abuseMirror{server: s, item: item, port: port})
+					abuseMirrorsMutex.Unlock()
+				}
 				s.StartA2S(item.ServerAddress)
 				loggedOn = true
 			} else {
@@ -238,12 +252,13 @@ doneLogin:
 		return
 	}
 
-	// Запускаем фейковых игроков
-	runPlayersForServer(s, item)
+	if !item.UseAbuse {
+		// Обычные зеркала продолжают использовать отдельные аккаунты.
+		runPlayersForServer(s, item)
 
-	// Отправляем все тикеты серверу Steam
-	log.Printf("[server:%d] Отправка тикетов игроков\n", port)
-	s.SendTickets()
+		log.Printf("[server:%d] Отправка тикетов игроков\n", port)
+		s.SendTickets()
+	}
 }
 
 // nextAccount безопасно возвращает следующий аккаунт из пула
@@ -336,7 +351,125 @@ func runPlayersForServer(s *server.Server, item Servers) {
 	}
 }
 
+func sendEmptyAbuseTickets(mirrors []abuseMirror) {
+	for _, mirror := range mirrors {
+		mirror.server.SendTickets()
+	}
+}
+
+// runSharedAbuseAccount logs one account in once, then creates a separate
+// authentication ticket for each use_abuse mirror.
+func runSharedAbuseAccount(account string, mirrors []abuseMirror) {
+	needsAccount := false
+	for _, mirror := range mirrors {
+		if mirror.item.Players > 0 {
+			needsAccount = true
+			break
+		}
+	}
+	if !needsAccount {
+		sendEmptyAbuseTickets(mirrors)
+		return
+	}
+
+	if account == "" {
+		log.Printf("[player] Для use_abuse нужен аккаунт, но accounts.txt пуст или аккаунт не выделен\n")
+		sendEmptyAbuseTickets(mirrors)
+		return
+	}
+
+	credentials := strings.SplitN(account, ":", 2)
+	if len(credentials) < 2 {
+		log.Printf("[player] Неверный формат строки аккаунта для use_abuse: %s\n", account)
+		sendEmptyAbuseTickets(mirrors)
+		return
+	}
+
+	login := credentials[0]
+	p := player.New()
+
+	for event := range p.Events() {
+		switch e := event.(type) {
+		case *steam.ConnectedEvent:
+			p.Logon(login, credentials[1])
+			continue
+
+		case *player.LoggedOnEvent:
+			if e.Result != 1 {
+				log.Printf("[player] Аккаунт %s для use_abuse: ошибка логина result=%d\n", login, e.Result)
+				sendEmptyAbuseTickets(mirrors)
+				return
+			}
+
+			log.Printf("[player] Общий аккаунт %s авторизован для %d зеркал use_abuse\n", login, len(mirrors))
+			playersMutex.Lock()
+			players = append(players, p)
+			playersMutex.Unlock()
+			p.GetAppOwnershipTicket(730)
+
+		case *player.AppOwnershipTicketResponse:
+			if e.Ticket == nil {
+				log.Printf("[player] Не удалось получить тикет приложения для аккаунта %s\n", login)
+				sendEmptyAbuseTickets(mirrors)
+				return
+			}
+
+			for _, mirror := range mirrors {
+				if mirror.item.Players == 0 {
+					mirror.server.SendTickets()
+					continue
+				}
+
+				if !p.WaitForGameConnectToken(30 * time.Second) {
+					log.Printf("[player] Не дождался токена подключения аккаунта %s для зеркала с портом %d\n", login, mirror.port)
+					mirror.server.SendTickets()
+					continue
+				}
+
+				result, err := p.AuthSessionTicket(e.Ticket)
+				if err != nil {
+					log.Printf("[player] Ошибка тикета %s: %v\n", login, err)
+					mirror.server.SendTickets()
+					continue
+				}
+
+				mirror.server.AddFakeClient(result.SteamId, result.Ticket, result.Crc)
+				mirror.server.SendTickets()
+				log.Printf("[player] Общий аккаунт %s добавлен в зеркало (порт %d)\n", login, mirror.port)
+			}
+			return
+
+		case steam.FatalErrorEvent:
+			log.Printf("[player] Фатальная ошибка общего аккаунта %s: %v\n", login, e)
+			sendEmptyAbuseTickets(mirrors)
+			return
+
+		case error:
+			log.Printf("[player] Ошибка общего аккаунта %s: %v\n", login, e)
+			sendEmptyAbuseTickets(mirrors)
+			return
+		}
+	}
+}
+
 func loadServers(config *Config) {
+	sharedAbuseAccount := ""
+	needsSharedAbuseAccount := false
+	for _, item := range config.Servers {
+		if item.UseAbuse && item.Players > 0 {
+			needsSharedAbuseAccount = true
+			break
+		}
+	}
+	if needsSharedAbuseAccount {
+		accountsMutex.Lock()
+		if len(accounts) > 0 {
+			sharedAbuseAccount = accounts[0]
+			accountsIndex = 1
+		}
+		accountsMutex.Unlock()
+	}
+
 	var startPort = config.StartPort
 	var portMutex sync.Mutex
 	tokensCount := 0
@@ -383,6 +516,14 @@ func loadServers(config *Config) {
 
 done:
 	wg.Wait()
+
+	abuseMirrorsMutex.Lock()
+	startedAbuseMirrors := append([]abuseMirror(nil), abuseMirrors...)
+	abuseMirrorsMutex.Unlock()
+	if len(startedAbuseMirrors) > 0 {
+		runSharedAbuseAccount(sharedAbuseAccount, startedAbuseMirrors)
+	}
+
 	log.Printf("[main] Загрузка завершена. Зеркал: %d, игроков: %d\n", len(mirrors), len(players))
 }
 
