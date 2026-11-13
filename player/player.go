@@ -24,6 +24,7 @@ type Player struct {
 	connectionCount int
 	gcTokens        [][]byte
 	gcTokensMutex   sync.Mutex
+	gcTokenSignal   chan struct{}
 	publicIp        uint32
 	tickets         []*protobuf.CMsgAuthTicket
 	ticketsMutex    sync.Mutex
@@ -43,7 +44,8 @@ type Ticket struct {
 
 func New() *Player {
 	player := &Player{
-		gcTokens: make([][]byte, 0),
+		gcTokens:      make([][]byte, 0),
+		gcTokenSignal: make(chan struct{}, 1),
 
 		client: steam.New(),
 	}
@@ -52,6 +54,28 @@ func New() *Player {
 	player.client.Connect()
 
 	return player
+}
+
+// WaitForGameConnectToken waits until a token is available for a new
+// authentication ticket.
+func (p *Player) WaitForGameConnectToken(timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		p.gcTokensMutex.Lock()
+		hasToken := len(p.gcTokens) > 0
+		p.gcTokensMutex.Unlock()
+		if hasToken {
+			return true
+		}
+
+		select {
+		case <-p.gcTokenSignal:
+		case <-timer.C:
+			return false
+		}
+	}
 }
 
 func (p *Player) Events() <-chan interface{} {

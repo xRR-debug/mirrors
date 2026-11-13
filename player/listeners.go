@@ -62,6 +62,12 @@ func (p *Player) handleGameConnectTokens(packet *protocol.Packet) {
 	}
 
 	p.gcTokensMutex.Unlock()
+	if len(body.Tokens) > 0 {
+		select {
+		case p.gcTokenSignal <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (p *Player) handleGetAppOwnershipTicketResponse(packet *protocol.Packet) {
